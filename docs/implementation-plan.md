@@ -18,6 +18,7 @@
 - No client-supplied identity, price, redirect URL, or provider mutation identity.
 - No network I/O inside database transactions; no application auth bypass.
 - Use test-mode provider only and generated JWKS fixtures for ordinary CI.
+- Primary execution is local and subscription-free. Optional free hosted demos may sleep; no strict hosted timing guarantee or paid upgrade. Follow free-tier-strategy.md.
 - Use the verified initial dependency candidates in integration-decisions.md; resolve/check compatibility and checksums, and pin toolchain/image digests before execution. Do not commit floating latest.
 - Initial live sandbox checks require user-supplied account access and are not proved by fake-provider tests.
 
@@ -31,7 +32,7 @@
 
 ## File structure
 
-Use the exact responsibilities and paths in [engineering guide](engineering-guide.md). Unit tests sit beside implementation; crossing-boundary/database tests live under tests/integration. Add files only in their owning task. No pre-generated service framework.
+Use the exact responsibilities and paths in [engineering guide](engineering-guide.md). Unit tests sit beside implementation; crossing-boundary/database tests live under tests/integration. Read free-tier-strategy.md before any deployment. Add files only in their owning task. No pre-generated service framework.
 
 ## Task 1: Reproducible database foundation
 
@@ -112,8 +113,8 @@ Use the exact responsibilities and paths in [engineering guide](engineering-guid
 - [ ] Write TestClaimExclusiveAndReclaim with two competing claimers, verify one token per task and expired lease recovery.
 - [ ] Write TestStaleTokenCannotFinish using an old token after reclaim; assert ErrStaleClaim and replacement lease unchanged. Also write TestExpiredTokenBeforeReclaim: an expired lease cannot finish even before the reclaimer replaces its token.
 - [ ] Write TestDurableRetryBudget: restart worker/store between attempts; attempts persist and fifth retryable failure escalates.
-- [ ] Write TestShutdownStopsClaims and TestJitterBounds: bounded goroutines exit within 20 seconds; jitter stays within documented ceilings.
-- [ ] Run go test ./internal/worker ./tests/integration -run 'TestClaim|TestStale|TestExpiredToken|TestDurable|TestShutdown|TestJitter' -count=1 -v; confirm failures.
+- [ ] Write TestWakeResumesOverdueWork: restart after simulated sleep and verify due work is claimed and expiry evaluated from current DB time. Write TestShutdownStopsClaims and TestJitterBounds: bounded goroutines exit within 20 seconds; jitter stays within documented ceilings.
+- [ ] Run go test ./internal/worker ./tests/integration -run 'TestClaim|TestStale|TestExpiredToken|TestDurable|TestWake|TestShutdown|TestJitter' -count=1 -v; confirm failures.
 - [ ] Implement database claiming, token checks, scheduling and worker loop; record lease outcome; no busy polling or unbounded goroutine per task.
 - [ ] Run selected tests and race detector; expect PASS.
 - [ ] Commit with message feat: persist bounded background work and claims.
@@ -136,7 +137,7 @@ Use the exact responsibilities and paths in [engineering guide](engineering-guid
 - [ ] Write TestObservationMapping for paid success, open declined/pending, expired unpaid, live mode, currency/amount mismatch.
 - [ ] Write TestWebhookSignatureAndReceipt: valid signature creates one event/task, repeated event creates no duplicate, invalid signature writes nothing, storage failure does not acknowledge 200.
 - [ ] Run go test ./internal/payment ./internal/httpapi -run 'TestStripe|TestObservation|TestWebhook' -count=1 -v; confirm failures.
-- [ ] Implement using the official SDK Client/signature helper; bind test account and version; subscribe only documented event types.
+- [ ] Confirm real sandbox account access first; do not assume new-account eligibility. Implement using the official SDK Client/signature helper; bind test account and version; subscribe only documented event types.
 - [ ] Run unit/integration checks; with explicitly available sandbox credentials run TestSandboxHostedCheckout and capture actual provider IDs safely in local evidence. Without credentials, record this gate as not verified.
 - [ ] Commit with message feat: integrate sandbox hosted checkout and signed callbacks.
 
@@ -185,7 +186,7 @@ Use the exact responsibilities and paths in [engineering guide](engineering-guid
 
 - [ ] Write script checks proving failed native commands produce nonzero overall exit and integration tests cannot point at a non-test database.
 - [ ] Run them to confirm failure.
-- [ ] Implement pinned multistage image/nonroot app, Compose healthchecks, explicit migrate-before-serve workflow, and CI formatting/vet/build/unit/race/PostgreSQL gates.
+- [ ] Implement pinned multistage image/nonroot app, Compose healthchecks, explicit migrate-before-serve workflow, and CI formatting/vet/build/unit/race/PostgreSQL gates. Use standard public Linux runners only if repository publication is authorized; otherwise remain within private free quotas or run locally. Optional Render/Neon deployment follows the free-tier profile without keepalive or paid workers.
 - [ ] Run formatting check, go vet ./..., go build ./..., go test ./..., go test -race ./..., go mod verify and Compose config. Run disposable database integration tests; all must pass.
 - [ ] Run sandbox acceptance when credentials are available; record provider account mode and final database state. If not available, report application integration gate incomplete.
 - [ ] Record completion latency separately from HTTP acceptance using a small known cohort; no production throughput/SLO claims.

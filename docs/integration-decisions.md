@@ -65,3 +65,11 @@ Release references: [pgx](https://github.com/jackc/pgx/releases/tag/v5.11.0), [G
 Before sandbox acceptance, supply an available Stripe test account/API key/webhook signing secret and an Auth0 issuer/audience with a test user. Keep credentials outside Git and logs. No paid subscriptions, real transactions, or external account provisioning are included in the documentation task.
 
 First milestone tests need neither external account. Real provider and identity checks are separate and cannot be claimed from local fixtures.
+
+## ADR 4: Local reliability lab and optional free hosted demo
+
+The primary runtime is local Go plus PostgreSQL in Compose, with Auth0 Free and accessible Stripe sandbox keys. No recurring hosted compute/database subscription is required. Use the official Stripe CLI for local callback delivery.
+
+Optional public demonstration uses one Render Free web service and Neon Free PostgreSQL. Sleeping suspends in-process worker execution; recovery resumes after wake and strict timing is proved locally. No always-on free-worker guarantee, paid upgrade or keepalive service is implied.
+
+Verify sandbox access before provider-adapter implementation; Stripe's India signup policy may block new accounts. A provider switch requires a revised provider-specific contract, not renamed SDK calls. See [free-tier strategy](free-tier-strategy.md) for current official limits, profiles and cost boundaries.

@@ -38,7 +38,7 @@ flowchart LR
     Hosted --> Provider
 ```
 
-One Go executable runs the HTTP server and a background worker. Docker Compose runs the application and PostgreSQL. Later, the same worker may run as a separate process without changing business rules.
+One Go executable runs the HTTP server and a background worker. Docker Compose runs the application and PostgreSQL as the primary local reliability lab. Auth0 uses its free plan and the payment provider uses sandbox mode. An optional hosted demo may sleep; see free-tier-strategy.md. Later, the same worker may run as a separate process without changing business rules.
 
 | Boundary | Owns | Does not own |
 | --- | --- | --- |

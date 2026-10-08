@@ -16,6 +16,7 @@ One store, one currency, one SKU per order. Reserve stock, integrate a payment-p
 - [Repository decision](docs/repository-decision.md): why the successor is separate and what to reuse from AtlasPay.
 - [Review record and reading order](docs/review-record.md): complete documentation package and requirement traceability.
 - [Implementation plan](docs/implementation-plan.md): eight tasks with interfaces, files and acceptance checks.
+- [Free-tier strategy](docs/free-tier-strategy.md): local reliability lab, free authentication/payment testing, and optional sleeping hosted demo.
 - [Preparation checklist](docs/preparation-checklist.md): documentation complete; runtime gates outstanding.
 
 ## Initial architecture
@@ -56,3 +57,7 @@ There are no build, lint, typecheck, or test commands yet because no application
 ## Relationship to AtlasPay
 
 [AtlasPay](https://github.com/Falcon-J/AtlasPay) remains a reference implementation. Historical AtlasPay results do not verify this project. New behavior must have fresh evidence.
+
+## Cost model
+
+Develop and test locally with Go/PostgreSQL/Compose, Auth0 Free and an accessible payment sandbox. Hosting is optional: a Render Free web service plus Neon Free PostgreSQL can demonstrate the system within quotas, but cannot promise always-on recovery timing. No cloud accounts or paid resources have been created. Read the free-tier strategy before provisioning.

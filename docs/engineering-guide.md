@@ -96,3 +96,11 @@ Pin Go/library versions and container images during implementation. Do not fabri
 ## Review checklist
 
 Can a reviewer locate the transaction boundary, ownership check, authoritative amount calculation, mutation identity, ambiguity handling, and recovery path without tracing a generic framework? If not, simplify the code before adding features.
+
+## Free-tier runtime profiles
+
+Primary learning profile: local application and PostgreSQL, Auth0 Free tenant and provider sandbox. Optional hosted profile: Render Free web service plus Neon Free PostgreSQL. Serve browser assets from the Go app; no second frontend hosting service is required.
+
+Derive pgxpool capacity from profile: 10 local connections, 5 hosted connections initially. These are tunable limits, not transaction guarantees. External health monitors and synthetic keepalive traffic are excluded. Database/recovery experiments use local/disposable PostgreSQL.
+
+Worker schedules apply while the process is running; a sleeping hosted demo has no wall-clock recovery SLA. See [free-tier strategy](free-tier-strategy.md).

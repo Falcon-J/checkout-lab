@@ -12,6 +12,7 @@ Date: 2026-10-08. Scope: design and implementation readiness; no application run
 6. [Engineering guide](engineering-guide.md): source ownership and conventions.
 7. [Implementation plan](implementation-plan.md): executable task sequence.
 8. [Learning roadmap](learning-roadmap.md): project and learning completion.
+9. [Free-tier strategy](free-tier-strategy.md): local learning, optional hosted demo, quotas and account-access gate.
 
 ## Requirement traceability
 
@@ -54,3 +55,9 @@ No schema execution, Go compilation, lint/typecheck, application tests, account 
 ## Execution status
 
 The documentation package is complete for review. The application is not implemented. Library patch versions and image digests will be resolved and pinned in Task 1 rather than fabricated before package resolution. External credentials are execution prerequisites, not missing application-design decisions.
+
+## Free-tier revision
+
+Verified official limits on 2026-10-08 and added a local-first cost policy. Retained Auth0 Free rather than replacing authentication unnecessarily. Added optional Render/Neon profile, process-sleep recovery semantics, hosted pool sizing and provider eligibility check. The core checkout invariants and provider-specific contract remain unchanged.
+
+No resources or subscriptions were provisioned. Existing application verification boundaries still apply.

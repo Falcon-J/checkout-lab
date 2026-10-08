@@ -90,3 +90,9 @@ Each experiment records commit, dependency versions, environment, command, elaps
 ## Sources
 
 Provider ambiguity, duplicate callbacks and retrieval behavior are based on the official contracts linked in [integration decisions](integration-decisions.md). All schedules, retry budgets and expiry/refund policies above are application design choices.
+
+## Hosted free-demo limitation
+
+All fixed schedules above are local/awake-process baselines. A free host may sleep; no worker runs during that interval. On startup reclaim expired leases and begin overdue-work/expiry sweeps before reporting worker readiness. Confirmation always evaluates current database time; a late payment follows refund recovery. Unknown-ID mutations beyond their 23-hour window escalate rather than being recreated.
+
+No paid scheduler, synthetic keepalive or always-on worker is required for the learning project. Demonstrate strict recovery timing locally; hosted demonstration results must record cold starts and sleep. See [free-tier strategy](free-tier-strategy.md).
