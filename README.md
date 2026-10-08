@@ -4,7 +4,7 @@ A focused checkout project for learning correctness, concurrency, and recovery w
 
 ## Current status
 
-Project foundation created on 2026-10-08. The architecture and state model are accepted as the starting design. This repository contains documentation; it does not yet contain a runnable application.
+Technical documentation completed on 2026-10-08: architecture, API, database transactions, real sandbox integration, managed authentication, recovery, engineering conventions and implementation tasks. This repository does not yet contain a runnable application.
 
 ## Product
 
@@ -14,7 +14,9 @@ One store, one currency, one SKU per order. Reserve stock, integrate a payment-p
 
 - [Checkout design](docs/checkout-design.md): scope, invariants, ownership, states, failure experiments, and planned folder structure.
 - [Repository decision](docs/repository-decision.md): why the successor is separate and what to reuse from AtlasPay.
-- [Preparation checklist](docs/preparation-checklist.md): remaining contracts and decisions before application implementation.
+- [Review record and reading order](docs/review-record.md): complete documentation package and requirement traceability.
+- [Implementation plan](docs/implementation-plan.md): eight tasks with interfaces, files and acceptance checks.
+- [Preparation checklist](docs/preparation-checklist.md): documentation complete; runtime gates outstanding.
 
 ## Initial architecture
 

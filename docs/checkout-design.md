@@ -24,7 +24,7 @@ Defaults below are the starting design choices for the new project, not descript
 
 Multi-item baskets, taxes, shipping, discounts, subscriptions, partial refunds, multiple currencies, multiple payment providers, customer cancellation, and accounting ledgers are outside the first version. Refunds are supported only as recovery for a successful payment that cannot be fulfilled. General refund administration is excluded.
 
-Redis, Kafka, Kubernetes, service extraction, a gateway, and a custom authentication platform are not initial requirements. Authentication mechanism and provider selection are separate pre-implementation decisions.
+Redis, Kafka, Kubernetes, service extraction, a gateway, and a custom authentication platform are not initial requirements. Authentication uses managed Auth0 access tokens; the provider is Stripe sandbox hosted Checkout. See integration-decisions.md for contracts and account prerequisites.
 
 ## 2. Architecture and ownership
 
@@ -80,7 +80,7 @@ I3 concerns one logical attempt, not an unlimited exactly-once guarantee. Provid
 
 Every local mutation that requires later external work must also persist that work in the same transaction. Do not hold database transactions open across provider calls. Use database time for reservation expiry and leases. Workers must guard updates with their claim token; external effects still require idempotency because lease expiry cannot prevent all overlapping execution.
 
-Schema, SQL, API payloads, authentication integration, and provider-specific webhook rules are subsequent design artifacts, not invented contracts in this specification.
+Detailed schema/transactions, proposed API payloads, managed authentication and provider rules are specified in data-model.md, api-contract.md and integration-decisions.md. These define the new application, not existing AtlasPay endpoints.
 
 ## 5. State model
 
@@ -110,7 +110,7 @@ Consumed and released reservations do not return to held. Proposed reservation d
 
 ### Payment and refund states
 
-Payment states: not_started, pending, unknown, succeeded, failed, canceled. Refund states: none, pending, unknown, succeeded.
+Payment states: not_started, pending, unknown, succeeded, failed, canceled. Refund states: none, pending, unknown, succeeded, failed, canceled. Failed/canceled refunds require operator review while the order remains recovery_required.
 
 - not_started becomes pending after provider object creation is established.
 - A transport ambiguity becomes unknown; reconciliation can establish pending, succeeded, failed, or canceled.
@@ -151,7 +151,7 @@ Browser redirects are navigation hints, not authoritative payment confirmation.
 
 Use real PostgreSQL for transactions and concurrency. Use a deterministic fake provider for crash timing and a separate sandbox integration suite for real API/webhook behavior. Do not require the real provider to reproduce every fault in CI.
 
-Retries apply only to classified retryable errors, with bounded attempts, backoff and jitter. Reconciliation has its own schedule and visibility; exhausting automatic attempts does not erase work. Exact intervals, attempt budgets, HTTP errors, and operator commands must be specified before implementation.
+Retries apply only to classified retryable errors, with bounded attempts, backoff and jitter. Reconciliation has its own schedule and visibility; exhausting automatic attempts does not erase work. Exact intervals, budgets and operator commands are specified in recovery-runbook.md; HTTP errors are specified in api-contract.md.
 
 Measure accepted orders separately from completed checkouts. Useful initial signals: pending-work age, unknown payments, reservation expirations, recovery-required orders, retry outcomes, and completion latency. Avoid raw customer/order identifiers as metric labels.
 
@@ -183,8 +183,8 @@ Required conventions: explicit errors, context/timeouts for I/O, graceful shutdo
 - Kafka gate: a deliberate experiment about event delivery/replay or independent consumers. Document duplicate handling and delivery guarantees before adding it.
 - Kubernetes gate: a separate deployment-learning objective after application correctness and recovery are demonstrated.
 
-## 10. Review and next artifacts
+## 10. Detailed contracts and execution
 
-Review the scope, 15-minute reservation policy, single-attempt payment policy, late-success refund behavior, and proposed repository choice. These defaults can be revised before code exists.
+The documentation package is complete in api-contract.md, data-model.md, integration-decisions.md, recovery-runbook.md, engineering-guide.md and implementation-plan.md. review-record.md provides traceability and verification boundaries.
 
-After review, finish the API/schema contracts, provider/authentication selection, exact retry and recovery budgets, and operator procedure. Then write the implementation plan. The first slice is checkout reservation and idempotency under real PostgreSQL concurrency; external payment follows it. No application scaffolding, dependencies, or external repository creation is part of this documentation task.
+The starting decisions are a 15-minute reservation, one logical hosted payment session per order, managed customer identity, and refund recovery for late success after stock release. External account access is required for real sandbox/identity acceptance. No application has been implemented by this documentation work.
