@@ -52,6 +52,16 @@ go build -o bin/reservation.exe ./cmd/reservation
 
 The demo expects the initial inventory of ten book-go units. It kills only the API/worker processes it started and demonstrates same-key replay, worker crash/restart, and stock restoration. Use a fresh demo database; running it repeatedly requires waiting for its last reservation to expire.
 
+On Windows without a 64-bit C compiler, run the regular checks with `-SkipRace`, then run the race suite in Linux Docker from this repository. The read-only mounts use the existing source and downloaded Go modules; tests use the same disposable Compose database.
+
+```powershell
+$projectDirectory = (Get-Location).Path
+$moduleDirectory = go env GOMODCACHE
+docker run --rm --network reservation-lab_default --mount "type=bind,source=$projectDirectory,target=/src,readonly" --mount "type=bind,source=$moduleDirectory,target=/go/pkg/mod,readonly" -w /src -e GOPROXY=off -e 'TEST_DATABASE_URL=postgres://reservation:local-test-only@postgres:5432/checkout_test?sslmode=disable' golang:1.25.0 go test -race ./... -count=1 -v
+```
+
+This disposable runner compiles a fresh race-enabled standard library and can take several minutes. Avoid running two test suites against the same database at once.
+
 ## Why the transactions work
 
 Create takes a transaction-scoped advisory lock for the request key, checks replay, and conditionally decrements inventory. Reservation and stock commit together. The unique key constraint remains a durable guard; hash collisions serialize requests without conflating their identities.
@@ -75,4 +85,6 @@ docs/                  active small plan and historical design references
 
 Real PostgreSQL 18 tests passed for last-item contention, concurrent key replay, conflicting reuse, rollback, expiry across workers, and startup recovery. Formatting, Go vet, build/typecheck and module checks passed. The separate-process demo killed/restarted its worker and proved expiry recovery and all ten units becoming reservable again. One read-only review found no critical or important issues.
 
-Docker Desktop crashed on startup while initializing its inference socket. Compose configuration was validated, but container execution is not verified; runtime tests used an isolated native PostgreSQL cluster. The race build is not verified because the installed C compiler supports 32-bit mode while Go targets 64-bit. scripts/verify.ps1 keeps race checks required by default; -SkipRace explicitly reports the omitted check when this toolchain is unavailable.
+Docker retry: Compose started PostgreSQL successfully and it became healthy. Formatting, module verification, vet, build/typecheck, and the full non-race suite passed against that container. The separate-process recovery demo also passed after earlier connection/request timeouts during the image download.
+
+The race suite compiled and ran in Linux Docker with Go 1.25.0. It failed TestConcurrentReplay: two requests exceeded the store's three-second deadline during concurrent replay. No data-race warning was reported, but the suite is **not passing**. This timeout remains an investigation item; no application deadline was increased to make the check pass. Windows still has a 32-bit-only C compiler; the Docker command above avoids that compiler limitation. scripts/verify.ps1 keeps race checks required by default, and -SkipRace explicitly reports the omitted check.
