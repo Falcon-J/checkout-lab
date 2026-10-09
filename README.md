@@ -11,6 +11,10 @@ A focused Go/PostgreSQL backend for reserving limited inventory, such as worksho
 - Expiry resumes from PostgreSQL after a worker or database restart.
 - Deadline evaluation occurs after row-lock acquisition.
 
+## Architecture overview
+
+![Reservation backend architecture](docs/reservation-architecture.png)
+
 ## Structure
 
 ```text
@@ -70,6 +74,10 @@ docker run --rm --network reservation-lab_default --mount "type=bind,source=$pro
 The first Linux build can take several minutes; the named volume retains its build cache. Populate the module cache with `go mod download` if needed. Repeatable process exercises and benchmarking commands are in the [runbook](docs/runbook.md). Actual verification and measurement outcomes are recorded in [experiments](docs/experiments.md).
 
 The GitHub workflow runs formatting, module verification, vet, build, ordered migrations, and the race suite on a fresh PostgreSQL service. Hosted execution is pending the first push. It uses the official [checkout](https://github.com/actions/checkout) and [setup-go](https://github.com/actions/setup-go) actions.
+
+## Verification status
+
+Native PostgreSQL integration tests, formatting, vet, build, and the worker crash/restart exercise passed. The Linux race suite and database-outage exercise remain unverified because the local Docker engine was unresponsive. The first hosted CI run will provide independent race-test evidence.
 
 ## Resume entry
 
