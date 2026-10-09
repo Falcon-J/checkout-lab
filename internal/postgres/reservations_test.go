@@ -1,6 +1,7 @@
-package reservation
+package postgres
 
 import (
+	"checkoutlab/internal/reservation"
 	"context"
 	"errors"
 	"fmt"
@@ -14,7 +15,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func testStore(t *testing.T) *Store {
+type testFixture struct {
+	*reservation.Service
+	pool *pgxpool.Pool
+}
+
+func testStore(t *testing.T) *testFixture {
 	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
@@ -27,17 +33,40 @@ func testStore(t *testing.T) *Store {
 	if !strings.HasPrefix(cfg.ConnConfig.Database, "checkout_test") {
 		t.Fatal("refusing to reset non-test database")
 	}
-	cfg.MaxConns = 20
+	cfg.MaxConns = 10
 	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
+
+	// These tests exercise transactional concurrency with the same ten-connection
+	// limit as the application, excluding simultaneous SCRAM connection startup.
+	warmCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	var warm []*pgxpool.Conn
+	defer func() {
+		for _, conn := range warm {
+			conn.Release()
+		}
+	}()
+	for i := 0; i < 10; i++ {
+		conn, err := pool.Acquire(warmCtx)
+		if err != nil {
+			t.Fatalf("pool warmup: %v", err)
+		}
+		warm = append(warm, conn)
+	}
+	// Release before issuing setup SQL, which also consumes a connection.
+	for _, conn := range warm {
+		conn.Release()
+	}
+	warm = nil
 	_, err = pool.Exec(context.Background(), "TRUNCATE reservations, inventory; INSERT INTO inventory(sku, available) VALUES ('book-go', 1), ('other', 10)")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewStore(pool, 15*time.Minute)
+	return &testFixture{reservation.NewService(NewStore(pool), 15*time.Minute), pool}
 }
 
 func TestLastItemConcurrency(t *testing.T) {
@@ -53,7 +82,7 @@ func TestLastItemConcurrency(t *testing.T) {
 			_, _, err := s.Create(context.Background(), fmt.Sprintf("buyer-key-%08d", i), "book-go", 1)
 			if err == nil {
 				successes.Add(1)
-			} else if errors.Is(err, ErrOutOfStock) {
+			} else if errors.Is(err, reservation.ErrOutOfStock) {
 				conflicts.Add(1)
 			} else {
 				t.Errorf("unexpected: %v", err)
@@ -108,7 +137,7 @@ func TestConcurrentReplay(t *testing.T) {
 		t.Fatal("no reservation")
 	}
 	_, _, err := s.Create(context.Background(), "same-request-key-123", "book-go", 2)
-	if !errors.Is(err, ErrConflict) {
+	if !errors.Is(err, reservation.ErrConflict) {
 		t.Fatalf("conflicting reuse: %v", err)
 	}
 }
@@ -116,7 +145,7 @@ func TestConcurrentReplay(t *testing.T) {
 func TestRejectedRequestDoesNotConsumeKey(t *testing.T) {
 	s := testStore(t)
 	_, _, err := s.Create(context.Background(), "rejected-key-123456", "book-go", 2)
-	if !errors.Is(err, ErrOutOfStock) {
+	if !errors.Is(err, reservation.ErrOutOfStock) {
 		t.Fatal(err)
 	}
 	_, _, err = s.Create(context.Background(), "rejected-key-123456", "book-go", 1)
@@ -136,7 +165,7 @@ func TestExpiryOnceAcrossWorkersAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A fresh Store has no in-memory state from the creator.
-	restarted := NewStore(s.pool, 15*time.Minute)
+	restarted := reservation.NewService(NewStore(s.pool), 15*time.Minute)
 	var wg sync.WaitGroup
 	for i := 0; i < 2; i++ {
 		wg.Add(1)

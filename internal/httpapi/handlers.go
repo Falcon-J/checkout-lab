@@ -1,7 +1,8 @@
-package reservation
+package httpapi
 
 import (
 	"bytes"
+	"checkoutlab/internal/reservation"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -14,13 +15,13 @@ import (
 	"unicode/utf8"
 )
 
-func Handler(store *Store, token string) http.Handler {
+func Handler(store *reservation.Service, ready func(context.Context) error, token string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "up"}) })
 	mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), time.Second)
 		defer cancel()
-		if err := store.pool.Ping(ctx); err != nil {
+		if err := ready(ctx); err != nil {
 			writeJSON(w, 503, map[string]string{"status": "not_ready"})
 			return
 		}
@@ -44,7 +45,7 @@ func Handler(store *Store, token string) http.Handler {
 		}
 		sku, quantity, err := decodeInput(body)
 		key := r.Header.Get("Idempotency-Key")
-		if err != nil || !validInput(key, sku, quantity) {
+		if err != nil || !reservation.ValidInput(key, sku, quantity) {
 			problem(w, 400, "invalid_request")
 			return
 		}
@@ -69,6 +70,23 @@ func Handler(store *Store, token string) http.Handler {
 		}
 		writeJSON(w, 200, result)
 	})
+
+	for action, transition := range map[string]func(context.Context, string) (reservation.Reservation, error){"confirm": store.Confirm, "cancel": store.Cancel} {
+		mux.HandleFunc("POST /reservations/{id}/"+action, func(w http.ResponseWriter, r *http.Request) {
+			// Transition endpoints accept no payload; drain neither unbounded input nor an ignored command.
+			body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1))
+			if err != nil || len(body) != 0 {
+				problem(w, 400, "invalid_request")
+				return
+			}
+			result, err := transition(r.Context(), r.PathValue("id"))
+			if err != nil {
+				storeError(w, err)
+				return
+			}
+			writeJSON(w, 200, result)
+		})
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		if r.URL.Path != "/health/live" && r.URL.Path != "/health/ready" {
@@ -86,12 +104,12 @@ func Handler(store *Store, token string) http.Handler {
 // silently accepting a last-write-wins request different from the caller's intent.
 func decodeInput(body []byte) (string, int, error) {
 	if !utf8.Valid(body) {
-		return "", 0, ErrInvalid
+		return "", 0, reservation.ErrInvalid
 	}
 	d := json.NewDecoder(bytes.NewReader(body))
 	t, err := d.Token()
 	if err != nil || t != json.Delim('{') {
-		return "", 0, ErrInvalid
+		return "", 0, reservation.ErrInvalid
 	}
 	seen := make(map[string]bool, 2)
 	var sku string
@@ -99,11 +117,11 @@ func decodeInput(body []byte) (string, int, error) {
 	for d.More() {
 		token, err := d.Token()
 		if err != nil {
-			return "", 0, ErrInvalid
+			return "", 0, reservation.ErrInvalid
 		}
 		name, ok := token.(string)
 		if !ok || seen[name] {
-			return "", 0, ErrInvalid
+			return "", 0, reservation.ErrInvalid
 		}
 		seen[name] = true
 		switch name {
@@ -112,32 +130,34 @@ func decodeInput(body []byte) (string, int, error) {
 		case "quantity":
 			err = d.Decode(&quantity)
 		default:
-			return "", 0, ErrInvalid
+			return "", 0, reservation.ErrInvalid
 		}
 		if err != nil {
-			return "", 0, ErrInvalid
+			return "", 0, reservation.ErrInvalid
 		}
 	}
 	if t, err = d.Token(); err != nil || t != json.Delim('}') {
-		return "", 0, ErrInvalid
+		return "", 0, reservation.ErrInvalid
 	}
 	if _, err = d.Token(); !errors.Is(err, io.EOF) {
-		return "", 0, ErrInvalid
+		return "", 0, reservation.ErrInvalid
 	}
 	if !seen["sku"] || !seen["quantity"] {
-		return "", 0, ErrInvalid
+		return "", 0, reservation.ErrInvalid
 	}
 	return sku, quantity, nil
 }
 func storeError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, ErrInvalid):
+	case errors.Is(err, reservation.ErrInvalid):
 		problem(w, 400, "invalid_request")
-	case errors.Is(err, ErrNotFound):
+	case errors.Is(err, reservation.ErrNotFound):
 		problem(w, 404, "not_found")
-	case errors.Is(err, ErrOutOfStock):
+	case errors.Is(err, reservation.ErrOutOfStock):
 		problem(w, 409, "out_of_stock")
-	case errors.Is(err, ErrConflict):
+	case errors.Is(err, reservation.ErrState):
+		problem(w, 409, "invalid_state_transition")
+	case errors.Is(err, reservation.ErrConflict):
 		problem(w, 409, "idempotency_conflict")
 	default:
 		slog.Error("reservation operation failed", "error", err)

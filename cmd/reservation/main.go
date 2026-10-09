@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"checkoutlab/internal/httpapi"
+	"checkoutlab/internal/postgres"
 	"checkoutlab/internal/reservation"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -70,15 +72,15 @@ func run() error {
 	defer pool.Close()
 	startup, stop := context.WithTimeout(ctx, 5*time.Second)
 	var ready bool
-	err = pool.QueryRow(startup, "SELECT to_regclass('inventory') IS NOT NULL AND to_regclass('reservations') IS NOT NULL").Scan(&ready)
+	err = pool.QueryRow(startup, "SELECT to_regclass('inventory') IS NOT NULL AND EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('reservations') AND conname='reservations_status_check' AND pg_get_constraintdef(oid) LIKE '%confirmed%' AND pg_get_constraintdef(oid) LIKE '%cancelled%')").Scan(&ready)
 	stop()
 	if err != nil {
 		return fmt.Errorf("database startup: %w", err)
 	}
 	if !ready {
-		return errors.New("schema missing; apply migrations/001_initial.sql to a fresh database")
+		return errors.New("schema missing or outdated; apply all migrations in numeric order")
 	}
-	store := reservation.NewStore(pool, *ttl)
+	store := reservation.NewService(postgres.NewStore(pool), *ttl)
 	if *mode == "worker" {
 		return reservation.RunExpiry(ctx, store, *interval)
 	}
@@ -93,7 +95,7 @@ func run() error {
 			}
 		}()
 	}
-	srv := &http.Server{Addr: *addr, Handler: reservation.Handler(store, token), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
+	srv := &http.Server{Addr: *addr, Handler: httpapi.Handler(store, pool.Ping, token), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		err := srv.ListenAndServe()
 		if !errors.Is(err, http.ErrServerClosed) {

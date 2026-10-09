@@ -1,6 +1,7 @@
-package reservation
+package postgres
 
 import (
+	"checkoutlab/internal/reservation"
 	"context"
 	"testing"
 	"time"
@@ -19,7 +20,9 @@ func TestWorkerSweepOnStartupAndCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- RunExpiry(ctx, NewStore(s.pool, time.Minute), time.Hour) }()
+	go func() {
+		done <- reservation.RunExpiry(ctx, reservation.NewService(NewStore(s.pool), time.Minute), time.Hour)
+	}()
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		got, err := s.Get(context.Background(), r.ID)

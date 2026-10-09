@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func RunExpiry(ctx context.Context, store *Store, interval time.Duration) error {
+func RunExpiry(ctx context.Context, store *Service, interval time.Duration) error {
 	if interval <= 0 {
 		return ErrInvalid
 	}

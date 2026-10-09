@@ -16,34 +16,46 @@ $headers=@{Authorization="Bearer $env:API_TOKEN";'Idempotency-Key'=[guid]::NewGu
 $base="http://127.0.0.1:$Port"
 $api=$null
 $worker=$null
+
+function Invoke-ReservationWithRetry {
+ for ($attempt=1;$attempt -le 3;$attempt++) {
+  try {return Invoke-RestMethod -NoProxy -TimeoutSec 5 "$base/reservations" -Method Post -Headers $headers -ContentType 'application/json' -Body '{"sku":"book-go","quantity":10}'}
+  catch {
+   $response=$_.Exception.Response
+   if (($response -and [int]$response.StatusCode -ne 503) -or $attempt -eq 3) {throw}
+   Write-Warning 'Transient reservation request failed; retrying the same idempotency key.'
+   Start-Sleep -Milliseconds 200
+  }
+ }
+}
 try {
- $api=Start-Process -FilePath $binary -ArgumentList @('-mode','api','-addr',"127.0.0.1:$Port",'-ttl','5s') -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $projectRoot '.tmp\demo-api.log')
+ $api=Start-Process -FilePath $binary -ArgumentList @('-mode','api','-addr',"127.0.0.1:$Port",'-ttl','15s') -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $projectRoot '.tmp\demo-api.log')
  $ready=$false
  for ($attempt=0;$attempt -lt 50;$attempt++) {
   if ($api.HasExited) {throw 'API exited; inspect .tmp/demo-api.log'}
-  try { $null=Invoke-RestMethod -NoProxy -TimeoutSec 3 "$base/health/ready";$ready=$true;break } catch {Start-Sleep -Milliseconds 100}
+  try { $null=Invoke-RestMethod -NoProxy -TimeoutSec 5 "$base/health/ready";$ready=$true;break } catch {Start-Sleep -Milliseconds 100}
  }
  if (!$ready) {throw 'API did not become ready'}
  $worker=Start-Process -FilePath $binary -ArgumentList @('-mode','worker','-interval','100ms') -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $projectRoot '.tmp\demo-worker-before.log')
- $reservation=Invoke-RestMethod -NoProxy -TimeoutSec 3 "$base/reservations" -Method Post -Headers $headers -ContentType 'application/json' -Body '{"sku":"book-go","quantity":10}'
- $replay=Invoke-RestMethod -NoProxy -TimeoutSec 3 "$base/reservations" -Method Post -Headers $headers -ContentType 'application/json' -Body '{"sku":"book-go","quantity":10}'
+ $reservation=Invoke-ReservationWithRetry
+ $replay=Invoke-ReservationWithRetry
  if ($reservation.id -ne $replay.id) {throw 'Replay created a second reservation'}
  if ($worker.HasExited) {throw 'Worker exited unexpectedly'}
  Stop-Process -Id $worker.Id -Force
  $worker.WaitForExit()
- Start-Sleep -Seconds 6
- $before=Invoke-RestMethod -NoProxy -TimeoutSec 3 "$base/reservations/$($reservation.id)" -Headers $headers
+ Start-Sleep -Seconds 16
+ $before=Invoke-RestMethod -NoProxy -TimeoutSec 5 "$base/reservations/$($reservation.id)" -Headers $headers
  if ($before.status -ne 'held') {throw 'Reservation expired before restart; repeat on a less loaded machine'}
  $worker=Start-Process -FilePath $binary -ArgumentList @('-mode','worker','-interval','100ms') -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $projectRoot '.tmp\demo-worker-after.log')
  $recovered=$false
  for ($attempt=0;$attempt -lt 50;$attempt++){
-  $after=Invoke-RestMethod -NoProxy -TimeoutSec 3 "$base/reservations/$($reservation.id)" -Headers $headers
+  $after=Invoke-RestMethod -NoProxy -TimeoutSec 5 "$base/reservations/$($reservation.id)" -Headers $headers
   if ($after.status -eq 'expired') {$recovered=$true;break}
   Start-Sleep -Milliseconds 100
  }
  if (!$recovered) {throw 'Restart did not recover expiry'}
  $headers['Idempotency-Key']=[guid]::NewGuid().ToString('N')
- $second=Invoke-RestMethod -NoProxy -TimeoutSec 3 "$base/reservations" -Method Post -Headers $headers -ContentType 'application/json' -Body '{"sku":"book-go","quantity":10}'
+ $second=Invoke-ReservationWithRetry
  if ($second.status -ne 'held') {throw 'Released stock could not be reserved'}
  Write-Output 'PASS: same-key replay; killed worker retained due state; restarted worker expired it; all ten stock units became reservable.'
 } finally {

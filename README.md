@@ -1,20 +1,34 @@
-# Reservation Lab
+# Reservation backend
 
-A small local backend for learning concurrency and database recovery with Go, PostgreSQL and Docker Compose.
+A focused Go/PostgreSQL backend for reserving limited inventory, such as workshop seats. One executable runs the HTTP API and an expiry worker, together or separately. This is a local engineering project; there are no real customers, payments, or production capacity claims.
 
-## What works
+## What it demonstrates
 
-- Reserve limited inventory and read reservation status.
-- Repeat a request safely using an idempotency key.
-- Reject conflicting key reuse and insufficient stock.
-- Expire reservations and return stock exactly once.
-- Restart the worker and recover overdue reservations from PostgreSQL.
+- Atomic inventory reservation without overselling.
+- Same-key replay returns the original reservation; conflicting reuse is rejected.
+- Confirmation retains stock; cancellation and expiry restore it exactly once.
+- Competing terminal transitions serialize on the reservation row.
+- Expiry resumes from PostgreSQL after a worker or database restart.
+- Deadline evaluation occurs after row-lock acquisition.
 
-One executable, two tables, one application dependency (pgx). No payments, customer-account platform, Redis, Kafka, Kubernetes or cloud hosting in the current scope. Earlier documents remain optional reference material; [the reservation plan](docs/reservation-plan.md) is active.
+## Structure
+
+```text
+cmd/reservation/        configuration, dependency wiring, shutdown
+internal/reservation/  model, validation, service policy, expiry worker
+internal/postgres/     SQL transactions, integration tests, replay benchmark
+internal/httpapi/      HTTP parsing, authorization, responses, unit tests
+migrations/            ordered SQL migrations
+scripts/               verification and controlled failure exercises
+docs/                  architecture, experiments, runbook
+docs/archive/          superseded designs and implementation history
+```
+
+The domain consumes a narrow repository interface. HTTP consumes the domain service and a readiness callback. Database-resetting integration tests reside in one package so Go's package parallelism cannot reset their shared database concurrently. pgx is the only direct application dependency.
 
 ## Run locally
 
-Requires Go 1.25+, PostgreSQL 18 (Docker or an existing local installation), and PowerShell 7 for the scripts.
+Requires Go 1.25+, Docker with Linux containers, and PowerShell 7 for scripts. Run from this directory.
 
 ```powershell
 docker compose up -d --wait postgres
@@ -23,68 +37,47 @@ $env:API_TOKEN = [Convert]::ToHexString([System.Security.Cryptography.RandomNumb
 go run ./cmd/reservation
 ```
 
-The Compose password is an explicitly local development credential. Both published database port and HTTP listener bind to loopback. The initial SQL runs only on a new Docker volume. For native PostgreSQL, create a fresh database and apply migrations/001_initial.sql with psql; the application never applies DDL automatically.
+Both database publishing and HTTP bind to loopback. The database password is a local development credential. One bearer token grants access to all reservations; customer identity and multi-tenant authorization are outside this scope. Modes `-mode api` and `-mode worker` run components separately. Default lifetime: 15 minutes; expiry sweep: 5 seconds and immediately on worker startup.
 
-The API is intentionally single-operator: one bearer token authorizes all reservations. It is not customer authentication or a public/multi-tenant deployment. Keep the token local. No token bypass or production-readiness claim.
+New database volumes apply all migrations in numeric order. Existing volumes need explicit migration `002_reservation_lifecycle.sql`; see the [runbook](docs/runbook.md). Never remove a volume to apply a migration.
 
 ```powershell
-$headers = @{
-  Authorization = "Bearer $env:API_TOKEN"
-  'Idempotency-Key' = [guid]::NewGuid().ToString('N')
-}
-$r = Invoke-RestMethod -NoProxy -TimeoutSec 3 http://127.0.0.1:8080/reservations -Method Post -Headers $headers -ContentType application/json -Body '{"sku":"book-go","quantity":1}'
-Invoke-RestMethod -NoProxy -TimeoutSec 3 "http://127.0.0.1:8080/reservations/$($r.id)" -Headers $headers
+$headers = @{ Authorization = "Bearer $env:API_TOKEN"; 'Idempotency-Key' = [guid]::NewGuid().ToString('N') }
+$row = Invoke-RestMethod -NoProxy -TimeoutSec 5 http://127.0.0.1:8080/reservations -Method Post -Headers $headers -ContentType application/json -Body '{"sku":"book-go","quantity":1}'
+Invoke-RestMethod -NoProxy -TimeoutSec 5 "http://127.0.0.1:8080/reservations/$($row.id)/confirm" -Method Post -Headers $headers
 ```
 
-New reservation: 201. Matching replay: 200 and the same ID/current state. Conflicting key or exhausted stock: 409. Missing row: 404. Invalid/duplicate/unknown JSON fields: 400; payload >4 KiB: 413; wrong media type: 415.
+`book-go` is the retained demonstration SKU with ten units. New reservation: 201; matching replay: 200 and original ID/current status. Read: `GET /reservations/{id}`. Confirm/cancel: empty-body `POST /reservations/{id}/confirm` or `/cancel`; repeated same terminal action: 200; conflicting action: 409. Invalid input: 400, oversized create body: 413, unsupported create media type: 415, missing record: 404, unavailable database: 503. Health endpoints are public locally.
 
-Default lifetime is 15 minutes; expiry sweep runs every 5 seconds and on worker startup. API-only and worker-only processes use -mode api and -mode worker. A due reservation remains held until a worker commits expiry; expires_at makes its deadline explicit.
+Held reservations can remain visible past their deadline until expiry commits. Confirming a due hold atomically expires it and returns 409. Clients receiving a timeout or 503 can retry creation with the same key; a failed acknowledgement does not prove the transaction failed.
 
 ## Verify
 
-**Tests reset inventory and reservations. Use a disposable database named checkout_test or checkout_test_*; never point them at a database whose contents you need.** Plain go test without TEST_DATABASE_URL runs unit checks and skips PostgreSQL tests.
+**Tests and benchmarks reset data. Use only a disposable database named `checkout_test` or `checkout_test_*`.** Without `TEST_DATABASE_URL`, database tests skip.
 
 ```powershell
 ./scripts/verify.ps1 -DatabaseURL 'postgres://reservation:local-test-only@127.0.0.1:54329/checkout_test?sslmode=disable'
-go build -o bin/reservation.exe ./cmd/reservation
-./scripts/demo.ps1 -DatabaseURL '<separate disposable demo database URL>'
 ```
 
-The demo expects the initial inventory of ten book-go units. It kills only the API/worker processes it started and demonstrates same-key replay, worker crash/restart, and stock restoration. Use a fresh demo database; running it repeatedly requires waiting for its last reservation to expire.
-
-On Windows without a 64-bit C compiler, run the regular checks with `-SkipRace`, then run the race suite in Linux Docker from this repository. The read-only mounts use the existing source and downloaded Go modules; tests use the same disposable Compose database.
+Windows requires a 64-bit C compiler for the race detector. With this machine's 32-bit compiler, use `-SkipRace` for Windows checks, then run the required race check in Linux. Run suites sequentially against the shared test database.
 
 ```powershell
 $projectDirectory = (Get-Location).Path
 $moduleDirectory = go env GOMODCACHE
-docker run --rm --network reservation-lab_default --mount "type=bind,source=$projectDirectory,target=/src,readonly" --mount "type=bind,source=$moduleDirectory,target=/go/pkg/mod,readonly" -w /src -e GOPROXY=off -e 'TEST_DATABASE_URL=postgres://reservation:local-test-only@postgres:5432/checkout_test?sslmode=disable' golang:1.25.0 go test -race ./... -count=1 -v
+docker run --rm --network reservation-lab_default --mount "type=bind,source=$projectDirectory,target=/src,readonly" --mount "type=bind,source=$moduleDirectory,target=/go/pkg/mod,readonly" --mount 'type=volume,source=reservation-lab-go-build,target=/root/.cache/go-build' -w /src -e GOPROXY=off -e 'TEST_DATABASE_URL=postgres://reservation:local-test-only@postgres:5432/checkout_test?sslmode=disable' golang:1.25.0 go test -race ./... -count=1 -v
 ```
 
-This disposable runner compiles a fresh race-enabled standard library and can take several minutes. Avoid running two test suites against the same database at once.
+The first Linux build can take several minutes; the named volume retains its build cache. Populate the module cache with `go mod download` if needed. Repeatable process exercises and benchmarking commands are in the [runbook](docs/runbook.md). Actual verification and measurement outcomes are recorded in [experiments](docs/experiments.md).
 
-## Why the transactions work
+The GitHub workflow runs formatting, module verification, vet, build, ordered migrations, and the race suite on a fresh PostgreSQL service. Hosted execution is pending the first push. It uses the official [checkout](https://github.com/actions/checkout) and [setup-go](https://github.com/actions/setup-go) actions.
 
-Create takes a transaction-scoped advisory lock for the request key, checks replay, and conditionally decrements inventory. Reservation and stock commit together. The unique key constraint remains a durable guard; hash collisions serialize requests without conflating their identities.
+## Resume entry
 
-Expiry locks due reservation rows with FOR UPDATE SKIP LOCKED. Stock restoration and expired status commit together. A crash before commit rolls back; a crash after commit leaves persisted completed state. Because this operation has no external effects, a lease framework or saga would add complexity without improving its guarantee.
+Use these bullets only after the recorded readiness checks pass:
 
-## Structure
+**Reservation Backend | Go, PostgreSQL, Docker**
+- Built a Go/PostgreSQL reservation backend with idempotent requests, atomic confirmation/cancellation, and persisted expiry recovery.
+- Tested oversell prevention and single stock restoration with real PostgreSQL concurrency tests and a controlled worker crash/restart exercise.
+- Investigated replay contention and row-lock timing; removed unnecessary locking from committed replays and checked expiration after lock acquisition.
 
-```text
-cmd/reservation/       startup, loopback checks and shutdown
-internal/reservation/  transactional store, HTTP boundary, expiry worker, tests
-migrations/            initial development schema
-scripts/               verification and controlled restart demo
-compose.yaml           local PostgreSQL
-docs/                  active small plan and historical design references
-```
-
-[AtlasPay](https://github.com/Falcon-J/AtlasPay) remains a reference. This project does not claim production throughput, high availability, real payment integration, or a big-tech offer.
-
-## Verification recorded on 2026-10-09
-
-Real PostgreSQL 18 tests passed for last-item contention, concurrent key replay, conflicting reuse, rollback, expiry across workers, and startup recovery. Formatting, Go vet, build/typecheck and module checks passed. The separate-process demo killed/restarted its worker and proved expiry recovery and all ten units becoming reservable again. One read-only review found no critical or important issues.
-
-Docker retry: Compose started PostgreSQL successfully and it became healthy. Formatting, module verification, vet, build/typecheck, and the full non-race suite passed against that container. The separate-process recovery demo also passed after earlier connection/request timeouts during the image download.
-
-The race suite compiled and ran in Linux Docker with Go 1.25.0. It failed TestConcurrentReplay: two requests exceeded the store's three-second deadline during concurrent replay. No data-race warning was reported, but the suite is **not passing**. This timeout remains an investigation item; no application deadline was increased to make the check pass. Windows still has a 32-bit-only C compiler; the Docker command above avoids that compiler limitation. scripts/verify.ps1 keeps race checks required by default, and -SkipRace explicitly reports the omitted check.
+The architecture and experiments explain the trade-offs. This project provides engineering discussion material alongside interview preparation and work experience.
