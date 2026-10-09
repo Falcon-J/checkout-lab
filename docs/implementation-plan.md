@@ -26,3 +26,5 @@ Ruling: continue on existing codex/reservation-core branch in dedicated local ch
 Ruling: concurrency fixtures prewarm ten connections (matching application MaxConns) before measuring transactional behavior. This excludes cold SCRAM/pool creation from the invariant check; it does not establish cold-start latency. Outage and explicit cancelled-lock tests exercise bounded failures separately.
 
 Checkpoint: native full suite and rebuilt worker crash/restart passed; code and CI reviews clear. Docker engine response timeout blocks Linux race verification and the database-outage demo. No publication performed.
+
+Publication update — 2026-10-09: the user explicitly authorized public publication, superseding the earlier no-publish constraint. Published as https://github.com/Falcon-J/checkout-lab on main. Hosted CI run 37944659606 passed, including the full Linux race suite and PostgreSQL integration tests without skips. Only the controlled database-outage exercise remains unverified; final readiness is still gated on that exercise.

@@ -24,3 +24,9 @@ After fast path, **native PostgreSQL** (a different database environment): 2,920
 - Fresh whole-branch review and targeted follow-ups found no Critical/Important issues. CI configuration was reviewed; hosted execution remains unverified before the first push.
 - Docker CLI attempts stopped returning results. A direct engine-pipe read timed out after ten seconds. Linux race verification and the database-outage exercise remain unverified; no passing result is claimed.
 - Readiness is pending those runtime checks. Source is preserved as a reviewed checkpoint, not a completed verification claim.
+
+## Publication and hosted verification — 2026-10-09
+
+The user authorized public publication as Falcon-J/checkout-lab. Commit f55294b was pushed to main. GitHub Actions run 37944659606 passed ordered PostgreSQL migrations, formatting, module verification, vet, build, and the full Linux race suite. Job logs confirmed the PostgreSQL package passed without skipped tests. This supersedes the earlier Linux race blocker; the controlled database-outage exercise remains unverified. The diagram footer is a historical pre-publication snapshot.
+
+Evidence: https://github.com/Falcon-J/checkout-lab/actions/runs/37944659606
