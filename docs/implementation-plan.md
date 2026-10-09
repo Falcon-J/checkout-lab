@@ -1,3 +1,5 @@
+> Frozen reference plan as of 2026-10-09. Current work follows reservation-plan.md; do not execute the payment/cloud scope automatically.
+
 # Checkout Lab Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans for native execution or superpowers:subagent-driven-development if the user explicitly selects delegation. Steps use checkbox syntax.
