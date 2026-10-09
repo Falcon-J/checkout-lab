@@ -26,7 +26,7 @@ try {
  docker compose stop postgres
  if ($LASTEXITCODE -ne 0) {throw 'Could not stop this project database'}
  $databaseStopped=$true
- if ([DateTimeOffset]::UtcNow -ge [DateTimeOffset]::Parse([string]$row.expires_at)) {throw 'Database stopped after the hold deadline; this run cannot prove outage recovery.'}
+ if ([DateTimeOffset]::UtcNow -ge ([DateTimeOffset]$row.expires_at)) {throw 'Database stopped after the hold deadline; this run cannot prove outage recovery.'}
  foreach ($path in @('/health/ready',"/reservations/$($row.id)")) {
   $response=Invoke-WebRequest -NoProxy -TimeoutSec 5 -SkipHttpErrorCheck "$base$path" -Headers $headers
   if ([int]$response.StatusCode -ne 503) {throw "Expected bounded 503 during outage, got $($response.StatusCode)"}
